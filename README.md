@@ -12,9 +12,6 @@ This project aims to develop an application using the STM32L476 microcontroller 
 
 - STM32CubeIDE v1.6.0
 - STM32Cube HAL v1.9.0
-- STM32Cube NFC Middleware v1.2.0
-- STM32Cube USB Middleware v1.4.0
-- STM32Cube FreeRTOS Middleware v1.5.0
 
 ## Project Configuration
 
