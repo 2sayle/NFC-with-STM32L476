@@ -1,8 +1,8 @@
-/*
- * ST25R3911B_errors.h
- *
- *  Created on: Jun 2, 2024
- *      Author: Elyass Jaoudat
+/**
+ * @file st25r3911b_errors.h
+ * @brief Header file containing definitions of error cases.
+ * @date Jun 3, 2024
+ * @author Elyass Jaoudat
  */
 
 
