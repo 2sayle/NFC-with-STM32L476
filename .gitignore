@@ -1,0 +1,11 @@
+/.DS_Store
+/.cproject.bak
+/.mxproject
+/.project.bak
+/.settings
+/.vscode
+/CMakeLists.txt
+/CMakePresets.json
+/build
+/cmake
+/startup_stm32l476xx.s
