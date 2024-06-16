@@ -5,8 +5,12 @@
  * @author Elyass Jaoudat
  */
 
+#pragma once
+
 #ifndef INC_MACROS_H_
 #define INC_MACROS_H_
+
+
 
 /* Exported typdefs ----------------------------------------- */
 typedef uint8_t byte;
@@ -17,16 +21,16 @@ typedef uint64_t dword;
 /* Exported Macros ------------------------------------------ */
 
 /* Binary Operations */
-#define SET_BIT(byte, bit)      ((byte) | (1U << (bit)))
-#define RESET_BIT(byte, bit)    ((byte) & ~(1U << (bit)))
-#define TOGGLE_BIT(byte, bit)   ((byte) ^ (1U << (bit)))
-#define READ_BIT(byte, bit)     (((byte) >> (bit)) & 0x01)
+#define ST25R_SET_BIT(byte, bit)      ((byte) = (byte) | (1U << (bit)))
+#define ST25R_RESET_BIT(byte, bit)    ((byte) = (byte) & ~(1U << (bit)))
+#define ST25R_TOGGLE_BIT(byte, bit)   ((byte) = (byte) ^ (1U << (bit)))
+#define ST25R_READ_BIT(byte, bit)     ((byte) = ((byte) >> (bit)) & 0x01)
 
 /* Register Operations */
-#define SET_REG(reg, value)             ((reg) |= (value))
-#define RESET_REG(reg, value)           ((reg) &= ~(value))
-#define READ_REG(reg, value)            ((reg) & (value))
-#define MODIFY_REG(reg, value, mask)    ((reg) = ((reg) & ~(mask)) | (value))
+#define ST25R_SET_REG(reg, value)             ((reg) |= (value))
+#define ST25R_RESET_REG(reg, value)           ((reg) &= ~(value))
+#define ST25R_READ_REG(reg, value)            ((reg) & (value))
+#define ST25R_MODIFY_REG(reg, value, mask)    ((reg) = ((reg) & ~(mask)) | (value))
 
 
 /* Bit masks */

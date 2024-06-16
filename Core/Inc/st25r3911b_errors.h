@@ -6,6 +6,8 @@
  */
 
 
+#pragma once
+
 #ifndef INC_ST25R3911B_ERRORS_H_
 #define INC_ST25R3911B_ERRORS_H_
 

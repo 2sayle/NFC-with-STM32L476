@@ -301,7 +301,7 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 
 
-static void ST25R_ExctractIRQReason(void) {
+static void ST25R_ExtractIRQReason(void) {
 
   /* Store content of interrupt register for better readability */
   byte mainIrqReg = st25r_irq_buffer[0];

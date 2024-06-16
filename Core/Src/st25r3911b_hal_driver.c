@@ -10,6 +10,7 @@
  */
 
 /* Includes ------------------------------------------------- */
+#include <string.h>
 #include "stm32l476xx.h"
 #include "main.h"
 #include "macros.h"
@@ -140,7 +141,7 @@ byte ST25R_ReadRegister(byte addr, byte *regData) {
     }
 
     /* Receive register data */
-    if (HAL_SPI_Receive(&hspi1, &regData, 1, MAX_SPI_TIMEOUT) != HAL_OK) {
+    if (HAL_SPI_Receive(&hspi1, regData, 1, MAX_SPI_TIMEOUT) != HAL_OK) {
         SPI1_SET_NSS();
         return ST25R_SPI_IO_STREAM_ERROR;
     }
@@ -410,7 +411,7 @@ byte ST25R_SetBitInRegister(byte addr, byte pos) {
     }
 
     /* Set bit */
-    SET_BIT(regData, pos);
+    ST25R_SET_BIT(regData, pos);
 
     /* Write register */
     if (ST25R_WriteRegister(addr, regData) != ST25R_OK) {
@@ -448,7 +449,7 @@ byte ST25R_ClearBitInRegister(byte addr, byte pos) {
     }
 
     /* Reset bit */
-    RESET_BIT(regData, pos);
+    ST25R_RESET_BIT(regData, pos);
 
     /* Write register */
     if (ST25R_WriteRegister(addr, regData) != ST25R_OK) {
@@ -477,7 +478,7 @@ byte ST25R_ModifyRegister(byte addr, byte value, byte mask) {
     }
 
     /* Modify register */
-    MODIFY_REG(regData, value, mask);
+    ST25R_MODIFY_REG(regData, value, mask);
 
     /* Write register */
     if (ST25R_WriteRegister(addr, regData) != ST25R_OK) {
@@ -586,7 +587,7 @@ byte ST25R_InitReaderOperations(void) {
     byte regData = 0;
 
     /* Configure Mode Definition register */
-    regData = MODIFY_REG(regData, ST25R_ISO14443A_OPMODE, ST25R_OPMODE_MASK);
+    ST25R_MODIFY_REG(regData, ST25R_ISO14443A_OPMODE, ST25R_OPMODE_MASK);
     if (ST25R_WriteRegister(ST25R_MODE_DEF_REG, regData) != ST25R_OK) {
         return ST25R_SPI_IO_STREAM_ERROR;
     }
@@ -689,6 +690,8 @@ byte ST25R_SetBitRate(byte bitRate) {
  * 
  * @return byte ST25R_OK if the Type A protocol has been selected successfully
  * @return byte ST25R_SPI_IO_STREAM_ERROR if an error occurs during SPI communication
+ * @return byte ST25R_IRQ_ERROR if an error occurs during IRQ handling
+ * @return byte ST25R_UNKNOWN_ERROR if an unknown error occurs
  */
 byte ST25R_SelectTypeA(void) {
 
@@ -728,8 +731,38 @@ byte ST25R_SelectTypeA(void) {
     if (status != ST25R_OK) {
         return status;
     }
-    
 
+    /* (Optional) Configure other registers */
+
+    /* Perform an analog preset command */
+    status = ST25R_SendDirectCommand(ST25R_ANALOG_PRESET_CMD);
+    if (status != ST25R_OK) {
+        return status;
+    }
+
+    /* Enter in 'Ready mode' by setting 'en' bit in Operation Control register */
+    status = ST25R_SetBitInRegister(ST25R_OP_CONTROL_REG, 7);
+    if (status != ST25R_OK) {
+        return status;
+    }
+    if (WaitForSpecificIRQ(ST25R_OSC_FREQ_STABLE_IRQ) != ST25R_OK) {
+        return ST25R_IRQ_ERROR;
+    }
+
+    /* Set Tx/Rx enable bits in Operation Control register */
+    status = ST25R_SetBitInRegister(ST25R_OP_CONTROL_REG, 3);
+    if (status != ST25R_OK) {
+        return status;
+    }
+    status = ST25R_SetBitInRegister(ST25R_OP_CONTROL_REG, 6);
+    if (status != ST25R_OK) {
+        return status;
+    }
+
+    /* RFID protocols usually require that the reader field is turned on for a while before sending the first command (5 ms for ISO14443) */
+    HAL_Delay(5);
+
+    return ST25R_OK;
 
 }
 
@@ -766,13 +799,208 @@ byte ST25R_SelectTypeB(void) {
 }
 
 
-/* ISO14443A Tx/Rx functions */
-byte ST25R_TransmitREQA(void);
+/* ISO14443A functions */
+
+/**
+ * @brief Transmit a REQA command to the ST25R3911B
+ * 
+ * @note This function is used to initiate a communication with a PICC (Proximity Integrated Circuit Card) in ISO14443A mode.
+ * 
+ * @return byte ST25R_OK if the REQA command has been transmitted successfully
+ * @return byte ST25R_SPI_IO_STREAM_ERROR if an error occurs during SPI communication
+ * @return byte ST25R_IRQ_ERROR if an error occurs during IRQ handling
+ * @return byte ST25R_UNKNOWN_ERROR if an unknown error occurs
+ */
+byte ST25R_TransmitREQA(void) {
+
+    /* Local variables */
+    byte status = ST25R_OK;
+    byte regData = 0;
+
+    /* Set no_crc_rx bit in Auxiliary Definition register */
+    status = ST25R_SetBitInRegister(ST25R_AUX_DEF_REG, 7);
+    if (status != ST25R_OK) {
+        return status;
+    }
+
+    /* Send the REQA command */
+    status = ST25R_SendDirectCommand(ST25R_TRANSMIT_REQA_CMD);
+    if (status != ST25R_OK) {
+        return status;
+    }
+    if (WaitForDirectCommand() != ST25R_OK) {
+        return ST25R_IRQ_ERROR;
+    }
+    /* Wait for the response */
+    if (WaitForSpecificIRQ(ST25R_TX_STOP_IRQ) != ST25R_OK) {
+        return ST25R_IRQ_ERROR;
+    }
+
+    /* Read the FIFO */
+    status = ST25R_ReadFifo(&regData, &fifo_lb);
+    if (status != ST25R_OK) {
+        return status;
+    }
+
+    /* Check the response */
+    if (regData != 0x04) {
+        return ST25R_UNKNOWN_ERROR;
+    }
+
+    return status;
+}
+
 byte ST25R_TransmitWUPA(void);
 byte ST25R_PerformAnticollA(void);
+
+/* ISO14443B functions */
+
+/* Generic transfer functions */
+
+/**
+ * @brief Transmit data to the PICC
+ * 
+ * @note This function is used to transmit bytes to the PICC 
+ * regardless of the selected protocol.
+ * 
+ * @param pData Pointer to the data buffer
+ * @param len Length of the data buffer
+ * @param timeout Timeout for the transmission
+ * 
+ * @return byte ST25R_OK if the data has been transmitted successfully
+ * @return byte ST25R_WRONG_PARAMETER if the parameters are not valid
+ * @return byte ST25R_SPI_IO_STREAM_ERROR if an error occurs during SPI communication
+ * @return byte ST25R_UNKNOWN_ERROR if an unknown error occurs
+ * @return byte ST25R_FIFO_OVFLOW_ERROR if an overflow occurs
+ * @return byte ST25R_FIFO_UDFLOW_ERROR if an underflow occurs
+ * @return byte ST25R_FIFO_EMPTY_ERROR if the FIFO is empty
+ */
+byte ST25R_TransmitData(byte *pData, ushort len, word timeout, byte crcOption) {
+
+    /* Assert parameters */
+    if ((pData == NULL) || (len == 0)) {
+        return ST25R_WRONG_PARAMETER;
+    }
+    if (len > MAX_NUMBER_TX_BYTES) {
+        return ST25R_WRONG_PARAMETER;
+    }
+
+    /* Local variables */
+    byte status = ST25R_OK;
+    byte regData = 0;
+    byte msb = 0;
+    byte lsb = 0;
+
+    /* Send 'Clear' direct command to clear the FIFO */
+    status = ST25R_SendDirectCommand(ST25R_CLEAR_CMD);
+    if (status != ST25R_OK) {
+        return status;
+    }
+
+    /* Configure the Number of Transmitted Bytes registers 1 and 2 */
+    len <<= 3;
+    msb = (byte) ((len & 0xFF00) >> 8);
+    lsb = (byte) (len & 0x00FF);
+    status = ST25R_WriteRegister(ST25R_NB1_TX_BYTES_REG, msb);
+    if (status != ST25R_OK) {
+        return status;
+    }
+    status = ST25R_WriteRegister(ST25R_NB2_TX_BYTES_REG, lsb);
+    if (status != ST25R_OK) {
+        return status;
+    }
+
+
+    /* Case 1. Data length is inferior to FIFO length */
+    if (len <= MAX_TX_FIFO_LEN) {
+
+        /* Fill the FIFO */
+        status = ST25R_LoadFifo(pData, (byte)len);
+        if (status != ST25R_OK) {
+            return status;
+        }
+
+        /* Send the data */
+        if (crcOption == TX_CRC_ON) {
+            status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITH_CRC_CMD);
+        } else {
+            status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITHOUT_CRC_CMD);
+        }
+        if (status != ST25R_OK) {
+            return status;
+        }
+
+        /* Wait for the end of transmission */
+        if (WaitForSpecificIRQ(ST25R_TX_STOP_IRQ) != ST25R_OK) {
+            return ST25R_IRQ_ERROR;
+        }
+
+    }
+
+    /* Case 2. Data length is superior to FIFO length */
+    else {
+
+        /* Compute the number of iterations */
+        byte nbFifoLoads = len % MAX_TX_FIFO_LEN;
+        byte nbLeftBytes = len - nbFifoLoads;
+
+        for (byte i = 0; i < nbFifoLoads; i++) {
+
+            /* Fill the FIFO */
+            status = ST25R_LoadFifo(pData, MAX_TX_FIFO_LEN);
+            if (status != ST25R_OK) {
+                return status;
+            }
+
+            /* Send the data */
+            if (crcOption == TX_CRC_ON) {
+                status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITH_CRC_CMD);
+            } else {
+                status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITHOUT_CRC_CMD);
+            }
+            if (status != ST25R_OK) {
+                return status;
+            }
+
+            /* Wait for the water level IRQ */
+            if (WaitForSpecificIRQ(ST25R_FIFO_WATER_LVL_IRQ) != ST25R_OK) {
+                return ST25R_IRQ_ERROR;
+            }
+
+            /* Update the data pointer */
+            pData += MAX_TX_FIFO_LEN;
+
+        }
+
+        /* Fill the FIFO with the remaining bytes */
+        status = ST25R_LoadFifo(pData, nbLeftBytes);
+        if (status != ST25R_OK) {
+            return status;
+        }
+
+        /* Send the data */
+        if (crcOption == TX_CRC_ON) {
+            status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITH_CRC_CMD);
+        } else {
+            status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITHOUT_CRC_CMD);
+        }
+
+        /* Wait for the end of transmission */
+        if (WaitForSpecificIRQ(ST25R_TX_STOP_IRQ) != ST25R_OK) {
+            return ST25R_IRQ_ERROR;
+        }
+
+    }
+
+    return ST25R_OK;
+
+}
+byte ST25R_ReceiveData(byte *pData, byte *len, ushort timeout);
+
+
 byte ST25R_SendAPDU(byte *apdu, byte len);
 byte ST25R_ReceiveAPDU(byte *apdu, ushort *len);
 
-/* ISO14443B Tx/Rx functions */
+
 
 

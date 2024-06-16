@@ -9,8 +9,11 @@
  * @author Elyass Jaoudat
  */
 
+#pragma once
+
 #ifndef INC_ST25R3911B_HAL_DRIVER_H_
 #define INC_ST25R3911B_HAL_DRIVER_H_
+
 
 /* Includes ------------------------------------------------- */
 #include "macros.h"
@@ -200,8 +203,11 @@
 #define ST25R_BPSK_OPMODE        ((byte) 0x0F)
 
 #define ST25R_OPMODE_POS         3
-#define ST25R_OPMODE_MASK       ((byte) 0b01111000)
+#define ST25R_OPMODE_MASK       ((byte) 0x78)
 
+/* Tx/Rx constants */
+#define TX_CRC_ON  ((byte) 0x00)
+#define TX_CRC_OFF ((byte) 0x01)
 
 /* Maximum constants */
 #define MAX_TX_FIFO_LEN 96
