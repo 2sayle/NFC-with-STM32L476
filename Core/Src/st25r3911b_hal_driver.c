@@ -37,8 +37,9 @@ byte fifo_np_lb = 0;
 
 /* Private functions prototypes ----------------------------- */
 
-static byte WaitForSpecificIRQ(irq_reason_t irqReason);
+static byte WaitForSpecificIRQ(irq_reason_t);
 static byte WaitForDirectCommand(void);
+static byte CheckForSpecificIRQ(irq_reason_t);
 
 
 /* Static functions ----------------------------------------- */
@@ -69,6 +70,19 @@ static byte WaitForDirectCommand(void) {
     ST25R_IRQ_FLAG = 0;
 
     return ST25R_OK;
+}
+
+static byte CheckForSpecificIRQ(irq_reason_t irqReason) {
+    if (ST25R_IRQ_FLAG == 1) {
+        if (ST25R_IRQ_REASON == irqReason) {
+            return ST25R_OK;
+        }
+
+        /* Clear the IRQ flag */
+        ST25R_IRQ_FLAG = 0;
+    }
+
+    return ST25R_IRQ_ERROR;
 }
 
 
@@ -173,7 +187,7 @@ byte ST25R_WriteMultipleRegisters(byte startAddr, byte *regDataArray, byte len) 
     txBuf[0] = startAddr | ST25R_REG_WRITE;
     memcpy(&txBuf[1], regDataArray, (size_t)len);
 
-    /* Send data stream to the FIFO */
+    /* Send data */
     SPI1_RESET_NSS();
     if (HAL_SPI_Transmit(&hspi1, txBuf, len+1, MAX_SPI_TIMEOUT) != HAL_OK) {
         SPI1_SET_NSS();
@@ -207,14 +221,14 @@ byte ST25R_ReadMultipleRegisters(byte startAddr, byte *regDataArray, byte len) {
     byte txBuf[MAX_ADDR_NUMBER + 1] = {0};
     txBuf[0] = startAddr | ST25R_REG_READ;
 
-    /* Send data stream to the FIFO */
+    /* Send data */
     SPI1_RESET_NSS();
     if (HAL_SPI_Transmit(&hspi1, txBuf, 1, MAX_SPI_TIMEOUT) != HAL_OK) {
         SPI1_SET_NSS();
         return ST25R_SPI_IO_STREAM_ERROR;
     }
 
-    /* Receive data stream */
+    /* Receive data */
     if (HAL_SPI_Receive(&hspi1, regDataArray, len, MAX_SPI_TIMEOUT) != HAL_OK) {
         SPI1_SET_NSS();
         return ST25R_SPI_IO_STREAM_ERROR;
@@ -239,13 +253,13 @@ byte ST25R_ReadMultipleRegisters(byte startAddr, byte *regDataArray, byte len) {
 byte ST25R_LoadFifo(byte *pData, byte len) {
 
     /* Local variables */
-    byte txBuf[MAX_TX_FIFO_LEN + 1] = {0};
+    byte txBuf[FIFO_SIZE + 1] = {0};
 
     /* Assert parameters */
     if ((pData == NULL) || (len == 0)) {
         return ST25R_WRONG_PARAMETER;
     }
-    if (len > MAX_TX_FIFO_LEN) {
+    if (len > FIFO_SIZE) {
         return ST25R_WRONG_PARAMETER;
     }
 
@@ -288,25 +302,25 @@ byte ST25R_ReadFifo(byte *pData, byte *len) {
     byte flag = ST25R_FIFO_READ;
 
     /* Assert parameters */
-    if ((pData == NULL) || (*len == 0) || (len == NULL)) {
+    if ((pData == NULL) || (len == 0)) {
         return ST25R_WRONG_PARAMETER;
     }
 
     /* Get number of bytes to be read in FIFO */
     if (ST25R_ReadRegister(ST25R_FIFO1_STATUS_REG, &fifoLen) != ST25R_OK) {
         return ST25R_SPI_IO_STREAM_ERROR;
-    }
+    } 
 
     /* Check FIFO status register 1 */
     if (fifoLen == 0x00) {
         return ST25R_FIFO_EMPTY_ERROR;
     }
-    if (fifoLen > MAX_RX_FIFO_LEN) {
+    if (fifoLen > FIFO_SIZE) {
         return ST25R_UNKNOWN_ERROR;
     }
 
     /* Check FIFO status register 2 */
-    if (ST25R_ReadRegister(ST25R_FIFO1_STATUS_REG, &regData) != ST25R_OK) {
+    if (ST25R_ReadRegister(ST25R_FIFO2_STATUS_REG, &regData) != ST25R_OK) {
         return ST25R_SPI_IO_STREAM_ERROR;
     }
     if (regData & 0x40) {
@@ -332,7 +346,7 @@ byte ST25R_ReadFifo(byte *pData, byte *len) {
         fifo_lb = 0;
     }
 
-    /* Send read fifo flag */
+    /* Send read fifo byte command */
     SPI1_RESET_NSS();
     if (HAL_SPI_Transmit(&hspi1, &flag, 1, MAX_SPI_TIMEOUT) != HAL_OK) {
         SPI1_SET_NSS();
@@ -340,7 +354,7 @@ byte ST25R_ReadFifo(byte *pData, byte *len) {
     }
     
     /* Read fifo */
-    if (HAL_SPI_Receive(&hspi1, pData, (uint16_t)fifoLen, MAX_SPI_TIMEOUT) != HAL_OK) {
+    if (HAL_SPI_Receive(&hspi1, pData, (ushort)fifoLen, MAX_SPI_TIMEOUT) != HAL_OK) {
         SPI1_SET_NSS();
         return ST25R_SPI_IO_STREAM_ERROR;
     }
@@ -487,6 +501,10 @@ byte ST25R_ModifyRegister(byte addr, byte value, byte mask) {
 
     return ST25R_OK;
 }
+
+
+
+
 
 
 /**
@@ -799,6 +817,279 @@ byte ST25R_SelectTypeB(void) {
 }
 
 
+/* Measure functions */
+
+/**
+ * @brief Measure the power supply of various voltages on the ST25R3911B
+ * 
+ * @note This function works only if 'en' bit in Operation Control register is set
+ * 
+ * @param voltage Pointer to the voltage value
+ * @param config Configuration of the power supply to be measured
+ * 
+ * @return byte ST25R_OK if the power supply has been measured successfully
+ * @return byte ST25R_WRONG_PARAMETER if the parameters are not valid
+ * @return byte ST25R_SPI_IO_STREAM_ERROR if an error occurs during SPI communication
+ * @return byte ST25R_UNKNOWN_ERROR if an unknown error occurs
+ * @return byte ST25R_IRQ_ERROR if an error occurs during IRQ handling
+ */
+
+byte ST25R_MeasurePowerSupply(ushort *voltage, byte config) {
+
+    /* Assert parameters */
+    if (voltage == NULL) {
+        return ST25R_WRONG_PARAMETER;
+    }
+    if (config > ST25R_MEAS_SRC_VSPRF) {
+        return ST25R_WRONG_PARAMETER;
+    }
+
+    /* Local variables */
+    byte regData = 0;
+    byte status = ST25R_OK;
+    ushort lsb_uv = 23438; // 1 LSB = 23.438 mV = 23438 uV
+    word microvolts = 0;
+
+    /* Configure Regulator Voltage Control register */
+    status = ST25R_ModifyRegister(ST25R_REGUL_VOLTAGE_CTRL_REG, config, ST25R_MEAS_SRC_MASK);
+    if (status != ST25R_OK) {
+        return status;
+    }
+
+    /* Send direct command for measuring the power */
+    status = ST25R_SendDirectCommand(ST25R_MEAS_PWR_SUPPLY_CMD);
+    if (status != ST25R_OK) {
+        return status;
+    }
+    status = WaitForDirectCommand();
+    if (status != ST25R_OK) {
+        return status;
+    }
+
+    /* Read out ADC content */
+    status = ST25R_ReadRegister(ST25R_AD_CONV_OUT_REG, &regData);
+    if (status != ST25R_OK) {
+        return status;
+    }
+
+    /* Compute the voltage (in mV) */
+    microvolts = regData * lsb_uv;
+    *voltage = (ushort) (microvolts / 1000);
+
+    return ST25R_OK;
+}
+
+
+/* Generic Tx/Rx functions */
+
+/**
+ * @brief Transmit data to the PICC
+ * 
+ * @note This function is used to transmit bytes to the PICC 
+ * regardless of the selected protocol.
+ * 
+ * @param pData Pointer to the data buffer
+ * @param len Length of the data buffer
+ * @param timeout Timeout for the transmission
+ * 
+ * @return byte ST25R_OK if the data has been transmitted successfully
+ * @return byte ST25R_WRONG_PARAMETER if the parameters are not valid
+ * @return byte ST25R_SPI_IO_STREAM_ERROR if an error occurs during SPI communication
+ * @return byte ST25R_UNKNOWN_ERROR if an unknown error occurs
+ * @return byte ST25R_FIFO_OVFLOW_ERROR if an overflow occurs
+ * @return byte ST25R_FIFO_UDFLOW_ERROR if an underflow occurs
+ * @return byte ST25R_FIFO_EMPTY_ERROR if the FIFO is empty
+ */
+byte ST25R_TransmitData(byte *pData, ushort len, byte crcOption) {
+
+    /* Assert parameters */
+    if ((pData == NULL) || (len == 0)) {
+        return ST25R_WRONG_PARAMETER;
+    }
+    if (len > MAX_NUMBER_TX_BYTES) {
+        return ST25R_WRONG_PARAMETER;
+    }
+    if ((crcOption != TX_CRC_ON) && (crcOption != TX_CRC_OFF)) {
+        return ST25R_WRONG_PARAMETER;
+    }
+
+    /* Local variables */
+    byte status = ST25R_OK;
+    byte regData = 0;
+    byte lenArray[2] = {0};
+
+    /* Send 'Clear' direct command to clear the FIFO */
+    status = ST25R_SendDirectCommand(ST25R_CLEAR_CMD);
+    if (status != ST25R_OK) {
+        return status;
+    }
+
+    /* Configure the Number of Transmitted Bytes registers 1 and 2 */
+    len <<= 3;
+    lenArray[0] = (byte) ((len & 0xFF00) >> 8); // MSB
+    lenArray[1] = (byte) (len & 0x00FF);        // LSB 
+    status = ST25R_WriteMultipleRegisters(ST25R_NB1_TX_BYTES_REG, lenArray, 2);
+    if (status != ST25R_OK) {
+        return status;
+    }
+
+
+    /* Case 1. Data length is inferior to FIFO length */
+    if (len <= FIFO_SIZE) {
+
+        /* Fill the FIFO */
+        status = ST25R_LoadFifo(pData, (byte)len);
+        if (status != ST25R_OK) {
+            return status;
+        }
+
+        /* Send the data */
+        if (crcOption == TX_CRC_ON) {
+            status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITH_CRC_CMD);
+        } else {
+            status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITHOUT_CRC_CMD);
+        }
+        if (status != ST25R_OK) {
+            return status;
+        }
+
+        /* Wait for the end of transmission */
+        if (WaitForSpecificIRQ(ST25R_TX_STOP_IRQ) != ST25R_OK) {
+            return ST25R_IRQ_ERROR;
+        }
+
+    }
+
+    /* Case 2. Data length is superior to FIFO length */
+    else {
+
+        /* Compute the number of iterations */
+        byte nbFifoLoads = len / FIFO_SIZE;
+        byte nbLeftBytes = len % FIFO_SIZE;
+
+        for (byte i = 0; i < nbFifoLoads; i++) {
+
+            /* Fill the FIFO */
+            status = ST25R_LoadFifo(pData, FIFO_SIZE);
+            if (status != ST25R_OK) {
+                return status;
+            }
+
+            /* Send the data */
+            if (crcOption == TX_CRC_ON) {
+                status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITH_CRC_CMD);
+            } else {
+                status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITHOUT_CRC_CMD);
+            }
+            if (status != ST25R_OK) {
+                return status;
+            }
+
+            /* Wait for the water level IRQ */
+            if (WaitForSpecificIRQ(ST25R_FIFO_WATER_LVL_IRQ) != ST25R_OK) {
+                return ST25R_IRQ_ERROR;
+            }
+
+            /* Update the data pointer */
+            pData += FIFO_SIZE;
+
+        }
+
+        /* Fill the FIFO with the remaining bytes */
+        status = ST25R_LoadFifo(pData, nbLeftBytes);
+        if (status != ST25R_OK) {
+            return status;
+        }
+
+        /* Send the data */
+        if (crcOption == TX_CRC_ON) {
+            status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITH_CRC_CMD);
+        } else {
+            status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITHOUT_CRC_CMD);
+        }
+
+        /* Wait for the end of transmission */
+        if (WaitForSpecificIRQ(ST25R_TX_STOP_IRQ) != ST25R_OK) {
+            return ST25R_IRQ_ERROR;
+        }
+
+    }
+
+    return ST25R_OK;
+
+}
+
+
+/**
+ * @brief Receive data from the PICC
+ * 
+ * @note This function is used to receive bytes from the PICC
+ * regardless of the selected protocol.
+ * 
+ * @param pData Pointer to the data buffer
+ * @param len Pointer to the length of the data buffer
+ * @param timeout Timeout for the reception
+ * 
+ * @return byte ST25R_OK if the data has been received successfully
+ * @return byte ST25R_WRONG_PARAMETER if the parameters are not valid
+ * @return byte ST25R_SPI_IO_STREAM_ERROR if an error occurs during SPI communication
+ * @return byte ST25R_UNKNOWN_ERROR if an unknown error occurs
+ * @return byte ST25R_FIFO_OVFLOW_ERROR if an overflow occurs
+ * @return byte ST25R_FIFO_UDFLOW_ERROR if an underflow occurs
+ * @return byte ST25R_FIFO_EMPTY_ERROR if the FIFO is empty
+ */
+byte ST25R_ReceiveData(byte *pData, ushort *len) {
+
+    /* Assert parameters */
+    if (pData == NULL) {
+        return ST25R_WRONG_PARAMETER;
+    }
+
+    /* Clear length parameter */
+    *len = 0;
+
+    /* Local variables */
+    byte status = ST25R_OK;
+    byte nbOfReadBytes = 0;
+
+    /* Case 1. More than FIFO_SIZE bytes to read */
+    if (CheckForSpecificIRQ(ST25R_FIFO_WATER_LVL_IRQ) == ST25R_OK) {
+
+        /* Read bytes until End of Reception IRQ */
+        do {
+            /* Read FIFO */
+            status = ST25R_ReadFifo(pData, &nbOfReadBytes);
+            if (status != ST25R_OK) {
+                return status;
+            }
+
+            /* Update parameters */
+            pData += nbOfReadBytes;
+            *len += nbOfReadBytes;
+
+        } while (CheckForSpecificIRQ(ST25R_RX_STOP_IRQ) != ST25R_OK);
+
+        /* Replace the pointer to its first value */
+        pData -= *len;
+
+    }
+
+    /* Case 2. Less than FIFO_SIZE bytes to read */
+    else if (CheckForSpecificIRQ(ST25R_RX_STOP_IRQ) == ST25R_OK) {
+        status = ST25R_ReadFifo(pData, nbOfReadBytes);
+        if (status != ST25R_OK) {
+            return status;
+        }
+
+        /* Update length */
+        *len = nbOfReadBytes;
+    }
+    
+    return ST25R_OK;
+
+}
+
+
 /* ISO14443A functions */
 
 /**
@@ -837,7 +1128,7 @@ byte ST25R_TransmitREQA(void) {
     }
 
     /* Read the FIFO */
-    status = ST25R_ReadFifo(&regData, &fifo_lb);
+    status = ST25R_ReadFifo(&regData, fifo_lb);
     if (status != ST25R_OK) {
         return status;
     }
@@ -854,153 +1145,4 @@ byte ST25R_TransmitWUPA(void);
 byte ST25R_PerformAnticollA(void);
 
 /* ISO14443B functions */
-
-/* Generic transfer functions */
-
-/**
- * @brief Transmit data to the PICC
- * 
- * @note This function is used to transmit bytes to the PICC 
- * regardless of the selected protocol.
- * 
- * @param pData Pointer to the data buffer
- * @param len Length of the data buffer
- * @param timeout Timeout for the transmission
- * 
- * @return byte ST25R_OK if the data has been transmitted successfully
- * @return byte ST25R_WRONG_PARAMETER if the parameters are not valid
- * @return byte ST25R_SPI_IO_STREAM_ERROR if an error occurs during SPI communication
- * @return byte ST25R_UNKNOWN_ERROR if an unknown error occurs
- * @return byte ST25R_FIFO_OVFLOW_ERROR if an overflow occurs
- * @return byte ST25R_FIFO_UDFLOW_ERROR if an underflow occurs
- * @return byte ST25R_FIFO_EMPTY_ERROR if the FIFO is empty
- */
-byte ST25R_TransmitData(byte *pData, ushort len, word timeout, byte crcOption) {
-
-    /* Assert parameters */
-    if ((pData == NULL) || (len == 0)) {
-        return ST25R_WRONG_PARAMETER;
-    }
-    if (len > MAX_NUMBER_TX_BYTES) {
-        return ST25R_WRONG_PARAMETER;
-    }
-
-    /* Local variables */
-    byte status = ST25R_OK;
-    byte regData = 0;
-    byte msb = 0;
-    byte lsb = 0;
-
-    /* Send 'Clear' direct command to clear the FIFO */
-    status = ST25R_SendDirectCommand(ST25R_CLEAR_CMD);
-    if (status != ST25R_OK) {
-        return status;
-    }
-
-    /* Configure the Number of Transmitted Bytes registers 1 and 2 */
-    len <<= 3;
-    msb = (byte) ((len & 0xFF00) >> 8);
-    lsb = (byte) (len & 0x00FF);
-    status = ST25R_WriteRegister(ST25R_NB1_TX_BYTES_REG, msb);
-    if (status != ST25R_OK) {
-        return status;
-    }
-    status = ST25R_WriteRegister(ST25R_NB2_TX_BYTES_REG, lsb);
-    if (status != ST25R_OK) {
-        return status;
-    }
-
-
-    /* Case 1. Data length is inferior to FIFO length */
-    if (len <= MAX_TX_FIFO_LEN) {
-
-        /* Fill the FIFO */
-        status = ST25R_LoadFifo(pData, (byte)len);
-        if (status != ST25R_OK) {
-            return status;
-        }
-
-        /* Send the data */
-        if (crcOption == TX_CRC_ON) {
-            status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITH_CRC_CMD);
-        } else {
-            status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITHOUT_CRC_CMD);
-        }
-        if (status != ST25R_OK) {
-            return status;
-        }
-
-        /* Wait for the end of transmission */
-        if (WaitForSpecificIRQ(ST25R_TX_STOP_IRQ) != ST25R_OK) {
-            return ST25R_IRQ_ERROR;
-        }
-
-    }
-
-    /* Case 2. Data length is superior to FIFO length */
-    else {
-
-        /* Compute the number of iterations */
-        byte nbFifoLoads = len % MAX_TX_FIFO_LEN;
-        byte nbLeftBytes = len - nbFifoLoads;
-
-        for (byte i = 0; i < nbFifoLoads; i++) {
-
-            /* Fill the FIFO */
-            status = ST25R_LoadFifo(pData, MAX_TX_FIFO_LEN);
-            if (status != ST25R_OK) {
-                return status;
-            }
-
-            /* Send the data */
-            if (crcOption == TX_CRC_ON) {
-                status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITH_CRC_CMD);
-            } else {
-                status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITHOUT_CRC_CMD);
-            }
-            if (status != ST25R_OK) {
-                return status;
-            }
-
-            /* Wait for the water level IRQ */
-            if (WaitForSpecificIRQ(ST25R_FIFO_WATER_LVL_IRQ) != ST25R_OK) {
-                return ST25R_IRQ_ERROR;
-            }
-
-            /* Update the data pointer */
-            pData += MAX_TX_FIFO_LEN;
-
-        }
-
-        /* Fill the FIFO with the remaining bytes */
-        status = ST25R_LoadFifo(pData, nbLeftBytes);
-        if (status != ST25R_OK) {
-            return status;
-        }
-
-        /* Send the data */
-        if (crcOption == TX_CRC_ON) {
-            status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITH_CRC_CMD);
-        } else {
-            status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WITHOUT_CRC_CMD);
-        }
-
-        /* Wait for the end of transmission */
-        if (WaitForSpecificIRQ(ST25R_TX_STOP_IRQ) != ST25R_OK) {
-            return ST25R_IRQ_ERROR;
-        }
-
-    }
-
-    return ST25R_OK;
-
-}
-byte ST25R_ReceiveData(byte *pData, byte *len, ushort timeout);
-
-
-byte ST25R_SendAPDU(byte *apdu, byte len);
-byte ST25R_ReceiveAPDU(byte *apdu, ushort *len);
-
-
-
 

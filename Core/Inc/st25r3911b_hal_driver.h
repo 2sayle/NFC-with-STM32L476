@@ -193,6 +193,15 @@
 
 #define ST25R_MOD_INDEX_MASK       ((byte) 0x7F)
 
+/* Power Supply Measure Sources */
+#define ST25R_MEAS_SRC_VDD      ((byte) 0x00)
+#define ST25R_MEAS_SRC_VSPA     ((byte) 0x00)
+#define ST25R_MEAS_SRC_VSPD     ((byte) 0x01)
+#define ST25R_MEAS_SRC_VSPRF    ((byte) 0x02)
+#define ST25R_MEAS_SRC_MASK     ((byte) (0x03 << 1))
+
+
+
 /* Initiator operation modes */
 #define ST25R_NFCIP1_OPMODE      ((byte) 0x00)
 #define ST25R_ISO14443A_OPMODE   ((byte) 0x01)
@@ -209,12 +218,14 @@
 #define TX_CRC_ON  ((byte) 0x00)
 #define TX_CRC_OFF ((byte) 0x01)
 
-/* Maximum constants */
-#define MAX_TX_FIFO_LEN 96
-#define MAX_RX_FIFO_LEN 96
+/* Constants */
+#define FIFO_SIZE 96
+#define FIFO_TX_WATER_LEVEL 16
+#define FIFO_RX_WATER_LEVEL 80
 #define MAX_SPI_TIMEOUT 10
 #define MAX_ADDR_NUMBER 0x3F
 #define MAX_NUMBER_TX_BYTES 8191
+
 
 /* Bit Rates */
 #define ST25R_106KBPS    ((byte) 0x00)
@@ -295,6 +306,13 @@ byte ST25R_InitReaderOperations(void);
 byte ST25R_SetBitRate(byte);
 byte ST25R_SelectTypeA(void);
 byte ST25R_SelectTypeB(void);
+
+/* Measure functions */
+byte ST25R_MeasurePowerSupply(ushort *, byte);
+
+/* Generic Tx/Rx functions */
+byte ST25R_TransmitData(byte *, ushort, byte);
+byte ST25R_ReceiveData(byte *, ushort *);
 
 /* ISO14443A Tx/Rx functions */
 byte ST25R_TransmitREQA(void);
