@@ -580,6 +580,15 @@ byte ST25R_InitModule(void) {
         return ST25R_IRQ_ERROR;
     }
 
+    /* Measure and power supply */
+    ushort voltage;
+    if (ST25R_MeasurePowerSupply(&voltage, ST25R_MEAS_SRC_VDD) != ST25R_OK) {
+        return ST25R_PWR_SUPPLY_ERROR;
+    }
+    if ((voltage < 2700) || (voltage > 3300)) {
+        return ST25R_PWR_SUPPLY_ERROR;
+    }
+
     /* Calibrate the antenna (optional) */
     if (ST25R_SendDirectCommand(ST25R_CAL_ANTENNA_CMD) != ST25R_OK) {
         return ST25R_SPI_IO_STREAM_ERROR;
@@ -1119,10 +1128,7 @@ byte ST25R_TransmitREQA(void) {
     if (status != ST25R_OK) {
         return status;
     }
-    if (WaitForDirectCommand() != ST25R_OK) {
-        return ST25R_IRQ_ERROR;
-    }
-    /* Wait for the response */
+    /* Wait for the end of transmission */
     if (WaitForSpecificIRQ(ST25R_TX_STOP_IRQ) != ST25R_OK) {
         return ST25R_IRQ_ERROR;
     }
@@ -1141,7 +1147,26 @@ byte ST25R_TransmitREQA(void) {
     return status;
 }
 
-byte ST25R_TransmitWUPA(void);
+
+byte ST25R_TransmitWUPA(void) {
+    /* Local variables */
+    byte regData = 0;
+    byte status = 0;
+
+    /* Send WUPA command */
+    status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WUPA_CMD);
+    if (status != ST25R_OK) {
+        return status;
+    }
+    /* Wait for the end of transmission */
+    if (WaitForSpecificIRQ(ST25R_TX_STOP_IRQ) != ST25R_OK) {
+        return ST25R_IRQ_ERROR;
+    }
+
+
+
+}
+byte ST25R_TransmitAnticollA(void);
 byte ST25R_PerformAnticollA(void);
 
 /* ISO14443B functions */
