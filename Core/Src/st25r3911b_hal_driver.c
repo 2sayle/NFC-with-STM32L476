@@ -14,6 +14,7 @@
 #include "stm32l476xx.h"
 #include "main.h"
 #include "macros.h"
+#include "iso14443.h"
 #include "st25r3911b_hal_driver.h"
 #include "st25r3911b_errors.h"
 
@@ -34,6 +35,11 @@ extern irq_reason_t ST25R_IRQ_REASON;
 byte fifo_lb = 0;
 byte fifo_ncp = 0;
 byte fifo_np_lb = 0;
+byte rxBuffer[MAX_NUMBER_RX_BYTES] = {0};
+byte txBuffer[MAX_NUMBER_TX_BYTES] = {0};
+
+/* ISO14443 */
+pcd_state ST25R_PCD_STATE = PCD_STANDBY;
 
 /* Private functions prototypes ----------------------------- */
 
@@ -544,8 +550,11 @@ byte ST25R_CheckIC(void) {
  * 
  * @return byte ST25R_OK if the module has been initialized successfully
  * @return byte ST25R_SPI_IO_STREAM_ERROR if an error occurs during SPI communication
+ * @return byte ST25R_IRQ_ERROR if an error occurs during IRQ handling
+ * @return byte ST25R_PWR_SUPPLY_ERROR if an error occurs during power supply measurement
+ * @return byte ST25R_UNKNOWN_ERROR if an unknown error occurs
  */
-byte ST25R_InitModule(void) {
+byte ST25R_PowerUpSequence(void) {
 
     /* Local variables */
     byte regData = 0;
@@ -585,7 +594,7 @@ byte ST25R_InitModule(void) {
     if (ST25R_MeasurePowerSupply(&voltage, ST25R_MEAS_SRC_VDD) != ST25R_OK) {
         return ST25R_PWR_SUPPLY_ERROR;
     }
-    if ((voltage < 2700) || (voltage > 3300)) {
+    if ((voltage < 2400) || (voltage > 5500)) {
         return ST25R_PWR_SUPPLY_ERROR;
     }
 
@@ -613,8 +622,8 @@ byte ST25R_InitReaderOperations(void) {
     /* Local variables */
     byte regData = 0;
 
-    /* Configure Mode Definition register */
-    ST25R_MODIFY_REG(regData, ST25R_ISO14443A_OPMODE, ST25R_OPMODE_MASK);
+    /* Configure Mode Definition register (Type A selected by default) */
+    ST25R_MODIFY_REG(regData, ST25R_ISO14443A_OPMODE << ST25R_OPMODE_POS, ST25R_OPMODE_MASK);
     if (ST25R_WriteRegister(ST25R_MODE_DEF_REG, regData) != ST25R_OK) {
         return ST25R_SPI_IO_STREAM_ERROR;
     }
@@ -918,13 +927,13 @@ byte ST25R_TransmitData(byte *pData, ushort len, byte crcOption) {
     if (len > MAX_NUMBER_TX_BYTES) {
         return ST25R_WRONG_PARAMETER;
     }
-    if ((crcOption != TX_CRC_ON) && (crcOption != TX_CRC_OFF)) {
+    if (crcOption > TX_CRC_OFF) {
         return ST25R_WRONG_PARAMETER;
     }
 
     /* Local variables */
     byte status = ST25R_OK;
-    byte regData = 0;
+    //byte regData = 0;
     byte lenArray[2] = {0};
 
     /* Send 'Clear' direct command to clear the FIFO */
@@ -1085,7 +1094,7 @@ byte ST25R_ReceiveData(byte *pData, ushort *len) {
 
     /* Case 2. Less than FIFO_SIZE bytes to read */
     else if (CheckForSpecificIRQ(ST25R_RX_STOP_IRQ) == ST25R_OK) {
-        status = ST25R_ReadFifo(pData, nbOfReadBytes);
+        status = ST25R_ReadFifo(pData, &nbOfReadBytes);
         if (status != ST25R_OK) {
             return status;
         }
@@ -1115,10 +1124,15 @@ byte ST25R_TransmitREQA(void) {
 
     /* Local variables */
     byte status = ST25R_OK;
-    byte regData = 0;
+    //byte regData = 0;
 
     /* Set no_crc_rx bit in Auxiliary Definition register */
     status = ST25R_SetBitInRegister(ST25R_AUX_DEF_REG, 7);
+    if (status != ST25R_OK) {
+        return status;
+    }
+    /* Set antcl bit in ISO14443A and NFC 106KBPS Settings register */
+    status = ST25R_SetBitInRegister(ST25R_ISO14443A_NFC_REG, 0);
     if (status != ST25R_OK) {
         return status;
     }
@@ -1133,25 +1147,25 @@ byte ST25R_TransmitREQA(void) {
         return ST25R_IRQ_ERROR;
     }
 
-    /* Read the FIFO */
-    status = ST25R_ReadFifo(&regData, fifo_lb);
-    if (status != ST25R_OK) {
-        return status;
-    }
-
-    /* Check the response */
-    if (regData != 0x04) {
-        return ST25R_UNKNOWN_ERROR;
-    }
-
     return status;
 }
 
 
 byte ST25R_TransmitWUPA(void) {
     /* Local variables */
-    byte regData = 0;
+    //byte regData = 0;
     byte status = 0;
+
+    /* Set no_crc_rx bit in Auxiliary Definition register */
+    status = ST25R_SetBitInRegister(ST25R_AUX_DEF_REG, 7);
+    if (status != ST25R_OK) {
+        return status;
+    }
+    /* Set antcl bit in ISO14443A and NFC 106KBPS Settings register */
+    status = ST25R_SetBitInRegister(ST25R_ISO14443A_NFC_REG, 0);
+    if (status != ST25R_OK) {
+        return status;
+    }
 
     /* Send WUPA command */
     status = ST25R_SendDirectCommand(ST25R_TRANSMIT_WUPA_CMD);
@@ -1163,11 +1177,44 @@ byte ST25R_TransmitWUPA(void) {
         return ST25R_IRQ_ERROR;
     }
 
-
+    return status;
 
 }
-byte ST25R_TransmitAnticollA(void);
-byte ST25R_PerformAnticollA(void);
+
+
+/**
+ * @brief Perform the anticollision procedure in ISO14443 Type A mode
+ * 
+ * @return byte ST25R_OK if the anticollision procedure has been performed successfully
+ * @return byte ST25R_SPI_IO_STREAM_ERROR if an error occurs during SPI communication
+ * @return byte ST25R_UNKNOWN_ERROR if an unknown error occurs
+ */
+byte ST25R_PerformAnticollA(void) {
+
+    /* Local variables */
+    byte status = ST25R_OK;
+    byte atqa[2] = {0};
+    ushort len = 0;
+
+    /* Check the PCD state */
+    if (ST25R_PCD_STATE != PCD_READY) {
+        return ST25R_UNKNOWN_ERROR;
+    }
+
+    /* Polling with REQA every 2 secs */
+    do {
+        status = ST25R_TransmitREQA();
+        if (status != ST25R_OK) {
+            return status;
+        }
+
+        status = ST25R_ReceiveData(atqa, &len);
+
+        HAL_Delay(2000);
+    } while ((status != ST25R_OK) && (len != 2));
+
+    return status;
+}
 
 /* ISO14443B functions */
 

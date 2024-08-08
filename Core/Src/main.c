@@ -104,6 +104,24 @@ int main(void)
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
 
+  /* Check the presence of the IC */
+  if (ST25R_CheckIC() != ST25R_OK) {
+    Error_Handler();
+  }
+
+  /* Initialize ST25R3911B */
+  if (ST25R_PowerUpSequence() != ST25R_OK) {
+    Error_Handler();
+  }
+  if (ST25R_SelectTypeA() != ST25R_OK) {
+    Error_Handler();
+  }
+
+  /* Perform Anticoll A */
+  if (ST25R_PerformAnticollA() != ST25R_OK) {
+    Error_Handler();
+  }
+
   /* USER CODE END 2 */
 
   /* Infinite loop */

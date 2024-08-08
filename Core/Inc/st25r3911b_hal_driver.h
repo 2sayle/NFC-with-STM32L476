@@ -194,11 +194,11 @@
 #define ST25R_MOD_INDEX_MASK       ((byte) 0x7F)
 
 /* Power Supply Measure Sources */
-#define ST25R_MEAS_SRC_VDD      ((byte) 0x00)
-#define ST25R_MEAS_SRC_VSPA     ((byte) 0x00)
-#define ST25R_MEAS_SRC_VSPD     ((byte) 0x01)
-#define ST25R_MEAS_SRC_VSPRF    ((byte) 0x02)
-#define ST25R_MEAS_SRC_MASK     ((byte) (0x03 << 1))
+#define ST25R_MEAS_SRC_VDD      ((byte) 0x00 << 1)
+#define ST25R_MEAS_SRC_VSPA     ((byte) 0x01 << 1)
+#define ST25R_MEAS_SRC_VSPD     ((byte) 0x02 << 1)
+#define ST25R_MEAS_SRC_VSPRF    ((byte) 0x03 << 1)
+#define ST25R_MEAS_SRC_MASK     ((byte) 0x03 << 1)
 
 
 
@@ -225,6 +225,7 @@
 #define MAX_SPI_TIMEOUT 10
 #define MAX_ADDR_NUMBER 0x3F
 #define MAX_NUMBER_TX_BYTES 8191
+#define MAX_NUMBER_RX_BYTES 8191
 
 
 /* Bit Rates */
@@ -301,7 +302,7 @@ byte ST25R_ModifyRegister(byte, byte, byte);
 
 /* Initialization and Configuration */
 byte ST25R_CheckIC(void);
-byte ST25R_InitModule(void);
+byte ST25R_PowerUpSequence(void);
 byte ST25R_InitReaderOperations(void);
 byte ST25R_SetBitRate(byte);
 byte ST25R_SelectTypeA(void);
@@ -313,13 +314,14 @@ byte ST25R_MeasurePowerSupply(ushort *, byte);
 /* Generic Tx/Rx functions */
 byte ST25R_TransmitData(byte *, ushort, byte);
 byte ST25R_ReceiveData(byte *, ushort *);
+byte ST25R_SendAPDU(byte *, byte);
+byte ST25R_ReceiveAPDU(byte *, ushort *);
 
 /* ISO14443A Tx/Rx functions */
 byte ST25R_TransmitREQA(void);
 byte ST25R_TransmitWUPA(void);
 byte ST25R_PerformAnticollA(void);
-byte ST25R_SendAPDU(byte *, byte);
-byte ST25R_ReceiveAPDU(byte *, ushort *);
+
 
 
 #endif /* INC_ST25R3911B_HAL_DRIVER_H_ */
