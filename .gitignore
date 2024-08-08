@@ -9,5 +9,4 @@
 /build
 /cmake
 /startup_stm32l476xx.s
-/Documents/*
-*.pdf
+/Documents/ISO*.pdf
