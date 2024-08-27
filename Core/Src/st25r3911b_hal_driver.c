@@ -44,6 +44,7 @@ pcd_state ST25R_PCD_STATE = PCD_STANDBY;
 /* Private functions prototypes ----------------------------- */
 
 static byte WaitForSpecificIRQ(irq_reason_t);
+static byte WaitForSpecificIRQ_T(irq_reason_t, word);
 static byte WaitForDirectCommand(void);
 static byte CheckForSpecificIRQ(irq_reason_t);
 
@@ -62,6 +63,31 @@ static byte WaitForSpecificIRQ(irq_reason_t irqReason) {
     ST25R_IRQ_FLAG = 0;
 
     return ST25R_OK;
+}
+
+static byte WaitForSpecificIRQ_T(irq_reason_t irqReason, word timeout) {
+    /* Get the current tick value */
+    word startTick = HAL_GetTick();
+
+    /* Wait for the IRQ to happen */
+    while (1) {
+        /* Check if the timeout has elapsed */
+        if ((HAL_GetTick() - startTick) > timeout) {
+            return ST25R_TIMEOUT_ERROR;
+        }
+
+        if (ST25R_IRQ_FLAG == 1) {
+            if (ST25R_IRQ_REASON == irqReason) {
+                /* Clear the IRQ flag */
+                ST25R_IRQ_FLAG = 0;
+                return ST25R_OK;
+            }
+            /* Clear the IRQ flag */
+            ST25R_IRQ_FLAG = 0;
+        }
+    }
+
+    return ST25R_IRQ_ERROR;
 }
 
 static byte WaitForDirectCommand(void) {
@@ -561,6 +587,11 @@ byte ST25R_PowerUpSequence(void) {
 
     /* Power-Up Sequence (see section 1.2.16 of DS11793) */
 
+    /* Send "Set Default" direct command */
+    if (ST25R_SendDirectCommand(ST25R_SET_DEFAULT_CMD) != ST25R_OK) {
+        return ST25R_SPI_IO_STREAM_ERROR;
+    }
+
     /* Configure the two IO configuration registers */
     regData = 0x3F;
     if (ST25R_WriteRegister(ST25R_IO_CONF1_REG, regData) != ST25R_OK) {
@@ -755,14 +786,14 @@ byte ST25R_SelectTypeA(void) {
     }
 
     /* Configure Mask Receive Timer register to be compliant with ISO14443A Frame Delay Time (FDT) */
-    regData = 17;  // MRT < FDT + 64/fc
+    regData = 16;  // MRT < FDT + 64/fc
     status = ST25R_WriteRegister(ST25R_MASK_RX_TIMER_REG, regData);
     if (status != ST25R_OK) {
         return status;
     }
 
     /* Configure No Response Timer register to be compliant with ISO14443A FDT */
-    regData = 21; // NRT > FDT + 64/fc
+    regData = 22; // NRT > FDT + 64/fc
     status = ST25R_WriteRegister(ST25R_NO_RESP_TIMER2_REG, regData);
     if (status != ST25R_OK) {
         return status;
@@ -781,9 +812,14 @@ byte ST25R_SelectTypeA(void) {
     if (status != ST25R_OK) {
         return status;
     }
-    if (WaitForSpecificIRQ(ST25R_OSC_FREQ_STABLE_IRQ) != ST25R_OK) {
-        return ST25R_IRQ_ERROR;
+    if (WaitForSpecificIRQ_T(ST25R_OSC_FREQ_STABLE_IRQ, 100) != ST25R_OK) {
+        /* Check that bit osc_ok of Auxiliary Display register is set */
+        ST25R_ReadRegister(ST25R_AUX_DISPLAY_REG, &regData);
+        if (!LBIT4_MASK(regData)) {
+            return ST25R_UNKNOWN_ERROR;
+        }
     }
+        
 
     /* Set Tx/Rx enable bits in Operation Control register */
     status = ST25R_SetBitInRegister(ST25R_OP_CONTROL_REG, 3);
@@ -795,7 +831,8 @@ byte ST25R_SelectTypeA(void) {
         return status;
     }
 
-    /* RFID protocols usually require that the reader field is turned on for a while before sending the first command (5 ms for ISO14443) */
+    /* RFID protocols usually require that the reader field is turned on 
+    for a while before sending the first command (5 ms for ISO14443) */
     HAL_Delay(5);
 
     return ST25R_OK;
@@ -827,8 +864,7 @@ byte ST25R_SelectTypeB(void) {
         return ST25R_IRQ_ERROR;
     }
 
-
-
+    // TODO: Implement the rest of the Type B protocol
     
     return ST25R_OK;
 
@@ -1102,6 +1138,10 @@ byte ST25R_ReceiveData(byte *pData, ushort *len) {
         /* Update length */
         *len = nbOfReadBytes;
     }
+
+    else if (nbOfReadBytes == 0) {
+        return ST25R_FIFO_EMPTY_ERROR;
+    }
     
     return ST25R_OK;
 
@@ -1196,22 +1236,39 @@ byte ST25R_PerformAnticollA(void) {
     byte atqa[2] = {0};
     ushort len = 0;
 
-    /* Check the PCD state */
+    /* Check the PCD state 
     if (ST25R_PCD_STATE != PCD_READY) {
         return ST25R_UNKNOWN_ERROR;
-    }
+    }*/
 
     /* Polling with REQA every 2 secs */
     do {
+
+        /* Send REQA command */
         status = ST25R_TransmitREQA();
         if (status != ST25R_OK) {
             return status;
         }
+        if (CheckForSpecificIRQ(ST25R_NO_RESP_TIM_IRQ) == ST25R_OK) {
+            return ST25R_TIMEOUT_ERROR;
+        }
 
+        /* Receive ATQA, if there is any */
         status = ST25R_ReceiveData(atqa, &len);
+        if (status != ST25R_OK) {
+            return status;
+        }
+        if (CheckForSpecificIRQ(ST25R_NO_RESP_TIM_IRQ) == ST25R_OK) {
+            return ST25R_TIMEOUT_ERROR;
+        }
 
         HAL_Delay(2000);
+
     } while ((status != ST25R_OK) && (len != 2));
+
+    /* TODO: Analyze the ATQA */
+    /* TODO: Select and anticollision loop */
+    /* TODO: Get UID and analyze it */
 
     return status;
 }

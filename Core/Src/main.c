@@ -104,11 +104,14 @@ int main(void)
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
 
+  /* Enable printf over UART2 */
+  RetargetInit(&huart2);
+
   /* Check the presence of the IC */
   if (ST25R_CheckIC() != ST25R_OK) {
     Error_Handler();
   }
-
+  
   /* Initialize ST25R3911B */
   if (ST25R_PowerUpSequence() != ST25R_OK) {
     Error_Handler();
@@ -397,6 +400,10 @@ static void ST25R_ExtractIRQReason(void) {
     else if (BIT0_MASK(errorWupIrqReg)) {
       ST25R_IRQ_REASON = ST25R_WUP_TIM_CAP_MEAS_IRQ;
     }
+
+    #ifdef DEBUG
+      printf("[NFC05A1 TCL Reader] IRQ Detected. Reason no.%d\r\n", ST25R_IRQ_REASON);
+    #endif
     
   }
 

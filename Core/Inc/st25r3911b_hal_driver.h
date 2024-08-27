@@ -20,6 +20,11 @@
 
 /* Macros --------------------------------------------------- */
 
+#define ST25R_ENABLE_TX()   ST25R_SetBitInRegister(ST25R_OP_CONTROL_REG, 3)
+#define ST25R_ENABLE_RX()   ST25R_SetBitInRegister(ST25R_OP_CONTROL_REG, 6)
+#define ST25R_DISABLE_TX()  ST25R_ClearBitInRegister(ST25R_OP_CONTROL_REG, 3)
+#define ST25R_DISABLE_RX()  ST25R_ClearBitInRegister(ST25R_OP_CONTROL_REG, 6)
+
 /* Constants ------------------------------------------------ */
 
 /* SPI Operating Modes Masks */

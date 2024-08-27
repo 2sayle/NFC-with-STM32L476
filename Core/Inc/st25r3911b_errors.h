@@ -22,6 +22,8 @@
 #define ST25R_PARITY_FRAMING_ERROR  ((byte) 0x07)   
 #define ST25R_IRQ_ERROR             ((byte) 0x08)
 #define ST25R_PWR_SUPPLY_ERROR      ((byte) 0x09)
+#define ST25R_CRC_ERROR             ((byte) 0x0A)
+#define ST25R_TIMEOUT_ERROR         ((byte) 0x0B)
 
 
 #endif /* INC_ST25R3911B_ERRORS_H_ */

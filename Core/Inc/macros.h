@@ -11,6 +11,9 @@
 #define INC_MACROS_H_
 
 
+/* Includes ----------------------------------------------- */
+#include <stdint.h>
+#include <stdio.h>
 
 /* Exported typdefs ----------------------------------------- */
 typedef uint8_t  byte;
@@ -45,21 +48,27 @@ typedef uint32_t word;
 #define BIT6_MASK(x)    (x & 0x40)
 #define BIT7_MASK(x)    (x & 0x80)
 
+/* "Logical" bit masks */
+#define LBIT0_MASK(x)    (BIT0_MASK(x) >> 0)
+#define LBIT1_MASK(x)    (BIT1_MASK(x) >> 1)
+#define LBIT2_MASK(x)    (BIT2_MASK(x) >> 2)
+#define LBIT3_MASK(x)    (BIT3_MASK(x) >> 3)
+#define LBIT4_MASK(x)    (BIT4_MASK(x) >> 4)
+#define LBIT5_MASK(x)    (BIT5_MASK(x) >> 5)
+#define LBIT6_MASK(x)    (BIT6_MASK(x) >> 6)
+#define LBIT7_MASK(x)    (BIT7_MASK(x) >> 7)
+
+
 /* Type casting */
 #define MAKE_SHORT(hi, lo)      ((uint16_t)(((uint16_t)(hi) << 8) | (lo)))
-#define MAKE_DWORD(b1, b2, b3, b4) \
-    ((uint32_t)(b1) << 24 | \
-     (uint32_t)(b2) << 16 | \
-     (uint32_t)(b3) <<  8 | \
-     (uint32_t)(b4))
 
 /* Debug */
-#ifdef DEBUG
-#define DEBUG_PRINT(x)              printf("[NFC Reader] "); printf(x); printf("\r\n")
-#define DEBUG_PRINTBUF(buf, len)    for (int i = 0; i < len; i++) printf("%02X ", buf[i])
+#if defined(DEBUG)
+    #define DEBUG_PRINT(str)              printf("[NFC05A1 TCL Reader] "); printf(str); printf("\r\n")
+    #define DEBUG_PRINTBUF(buf, len)      for (int i = 0; i < len; i++) {printf("%02X ", buf[i])}
 #else
-#define DEBUG_PRINT(x)
-#define DEBUG_PRINTBUF(buf, len)
+    #define DEBUG_PRINT(x)
+    #define DEBUG_PRINTBUF(buf, len)
 #endif
 
 
