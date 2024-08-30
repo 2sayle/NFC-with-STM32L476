@@ -1,6 +1,6 @@
 # STM32L476 NFC Project
 
-This project aims to develop an application using the STM32L476 microcontroller and Near Field Communication (NFC) technology. The main objective is to enable wireless communication between the microcontroller and other ISO1443-compatible devices.
+This project aims to develop an application using the STM32L476 microcontroller and Near Field Communication (NFC) technology. The main objective is to enable wireless communication between the microcontroller and other ISO14443-compatible devices.
 
 ## Required Hardware
 
