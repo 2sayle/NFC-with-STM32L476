@@ -24,6 +24,7 @@
 #define ST25R_PWR_SUPPLY_ERROR      ((byte) 0x09)
 #define ST25R_CRC_ERROR             ((byte) 0x0A)
 #define ST25R_TIMEOUT_ERROR         ((byte) 0x0B)
+#define ST25R_NO_RESP_ERROR         ((byte) 0x0C)
 
 
 #endif /* INC_ST25R3911B_ERRORS_H_ */

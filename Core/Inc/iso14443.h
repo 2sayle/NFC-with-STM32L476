@@ -30,6 +30,7 @@
 #define SELECT  ((byte) 0x93)
 #define RATS    ((byte) 0xE0)
 
+#define UID_MASK            ((byte) 0xC0)
 #define UID_SINGLE          ((byte) 0x00)
 #define UID_DOUBLE          ((byte) 0x01 << 6)
 #define UID_TRIPLE          ((byte) 0x02 << 6)

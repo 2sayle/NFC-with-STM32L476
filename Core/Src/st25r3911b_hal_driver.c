@@ -51,6 +51,58 @@ static byte CheckForSpecificIRQ(irq_reason_t);
 
 /* Static functions ----------------------------------------- */
 
+
+/**
+ * @brief Wait for an IRQ to happen (blocking)
+ * 
+ * @param None
+ * @return irq_reason_t 
+ */
+static irq_reason_t WaitForIRQ(void) {
+    /* Wait for the IRQ to happen */
+    while (ST25R_IRQ_FLAG == 0);
+
+    /* Clear the IRQ flag */
+    ST25R_IRQ_FLAG = 0;
+
+    return ST25R_IRQ_REASON;
+}
+
+/**
+ * @brief Wait for an IRQ to happen with a timeout in ms
+ * 
+ * @param timeout Value in ms
+ * @return irq_reason_t 
+ */
+static irq_reason_t WaitForIRQ_T(word timeout) {
+    /* Get the current tick value */
+    word startTick = HAL_GetTick();
+
+    /* Wait for the IRQ to happen */
+    while (1) {
+        /* Check if the timeout has elapsed */
+        if ((HAL_GetTick() - startTick) > timeout) {
+            return ST25R_TIMEOUT_ERROR;
+        }
+
+        if (ST25R_IRQ_FLAG == 1) {
+            /* Clear the IRQ flag */
+            ST25R_IRQ_FLAG = 0;
+            return ST25R_IRQ_REASON;
+        }
+    }
+
+    return ST25R_IRQ_ERROR;
+}
+
+/**
+ * @brief Wait for a specific IRQ to happen (blocking)
+ * 
+ * @param irqReason
+ * @return byte Return values:
+ *         - ST25R_OK if the IRQ has been set
+ *         - ST25R_IRQ_ERROR if an error occurs during IRQ handling
+ */
 static byte WaitForSpecificIRQ(irq_reason_t irqReason) {
     /* Wait for the IRQ to happen */
     while (ST25R_IRQ_FLAG == 0);
@@ -65,6 +117,16 @@ static byte WaitForSpecificIRQ(irq_reason_t irqReason) {
     return ST25R_OK;
 }
 
+/**
+ * @brief Wait for a specific IRQ to happen with a timeout in ms
+ * 
+ * @param irqReason Number of the IRQ to wait for
+ * @param timeout Value in ms
+ * @return byte Return values:
+ *         - ST25R_OK if the IRQ has been set
+ *         - ST25R_TIMEOUT_ERROR if the timeout has elapsed
+ *         - ST25R_IRQ_ERROR if an error occurs during IRQ handling
+ */
 static byte WaitForSpecificIRQ_T(irq_reason_t irqReason, word timeout) {
     /* Get the current tick value */
     word startTick = HAL_GetTick();
@@ -90,6 +152,13 @@ static byte WaitForSpecificIRQ_T(irq_reason_t irqReason, word timeout) {
     return ST25R_IRQ_ERROR;
 }
 
+/**
+ * @brief Wait for a direct command to be executed
+ * 
+ * @return byte Return values:
+ *         - ST25R_OK if the direct command has been executed
+ *         - ST25R_IRQ_ERROR if an error occurs during IRQ handling 
+ */
 static byte WaitForDirectCommand(void) {
     /* Wait for the IRQ to happen */
     while (ST25R_IRQ_FLAG == 0);
@@ -392,6 +461,8 @@ byte ST25R_ReadFifo(byte *pData, byte *len) {
     }
     SPI1_SET_NSS();
 
+    *len = fifoLen;
+
     return ST25R_OK;
 
 }
@@ -620,6 +691,14 @@ byte ST25R_PowerUpSequence(void) {
         return ST25R_IRQ_ERROR;
     }
 
+    /* Calibrate the antenna (optional) */
+    if (ST25R_SendDirectCommand(ST25R_CAL_ANTENNA_CMD) != ST25R_OK) {
+        return ST25R_SPI_IO_STREAM_ERROR;
+    }
+    if (WaitForDirectCommand() != ST25R_OK) {
+        return ST25R_IRQ_ERROR;
+    } 
+
     /* Measure and power supply */
     ushort voltage;
     if (ST25R_MeasurePowerSupply(&voltage, ST25R_MEAS_SRC_VDD) != ST25R_OK) {
@@ -627,14 +706,6 @@ byte ST25R_PowerUpSequence(void) {
     }
     if ((voltage < 2400) || (voltage > 5500)) {
         return ST25R_PWR_SUPPLY_ERROR;
-    }
-
-    /* Calibrate the antenna (optional) */
-    if (ST25R_SendDirectCommand(ST25R_CAL_ANTENNA_CMD) != ST25R_OK) {
-        return ST25R_SPI_IO_STREAM_ERROR;
-    }
-    if (WaitForDirectCommand() != ST25R_OK) {
-        return ST25R_IRQ_ERROR;
     }
 
     return ST25R_OK;
@@ -793,11 +864,12 @@ byte ST25R_SelectTypeA(void) {
     }
 
     /* Configure No Response Timer register to be compliant with ISO14443A FDT */
-    regData = 22; // NRT > FDT + 64/fc
-    status = ST25R_WriteRegister(ST25R_NO_RESP_TIMER2_REG, regData);
+    byte regDataArray[3] = {0, 100, 0}; // NRT > FDT + 64/fc
+    status = ST25R_WriteMultipleRegisters(ST25R_NO_RESP_TIMER1_REG, regDataArray, 3);
     if (status != ST25R_OK) {
         return status;
     }
+
 
     /* (Optional) Configure other registers */
 
@@ -819,7 +891,14 @@ byte ST25R_SelectTypeA(void) {
             return ST25R_UNKNOWN_ERROR;
         }
     }
-        
+    
+    /* Calibrate the antenna (optional) */
+    if (ST25R_SendDirectCommand(ST25R_CAL_ANTENNA_CMD) != ST25R_OK) {
+        return ST25R_SPI_IO_STREAM_ERROR;
+    }
+    if (WaitForDirectCommand() != ST25R_OK) {
+        return ST25R_IRQ_ERROR;
+    }
 
     /* Set Tx/Rx enable bits in Operation Control register */
     status = ST25R_SetBitInRegister(ST25R_OP_CONTROL_REG, 3);
@@ -845,6 +924,7 @@ byte ST25R_SelectTypeA(void) {
  * 
  * @return byte ST25R_OK if the Type B protocol has been selected successfully
  * @return byte ST25R_SPI_IO_STREAM_ERROR if an error occurs during SPI communication
+ * @return byte ST25R_IRQ_ERROR if an error occurs during IRQ handling
  */
 byte ST25R_SelectTypeB(void) {
     
@@ -972,7 +1052,7 @@ byte ST25R_TransmitData(byte *pData, ushort len, byte crcOption) {
     //byte regData = 0;
     byte lenArray[2] = {0};
 
-    /* Send 'Clear' direct command to clear the FIFO */
+    /* Send 'Clear' direct command to flush the FIFO */
     status = ST25R_SendDirectCommand(ST25R_CLEAR_CMD);
     if (status != ST25R_OK) {
         return status;
@@ -980,8 +1060,8 @@ byte ST25R_TransmitData(byte *pData, ushort len, byte crcOption) {
 
     /* Configure the Number of Transmitted Bytes registers 1 and 2 */
     len <<= 3;
-    lenArray[0] = (byte) ((len & 0xFF00) >> 8); // MSB
-    lenArray[1] = (byte) (len & 0x00FF);        // LSB 
+    lenArray[0] = MSB(len);
+    lenArray[1] = LSB(len);
     status = ST25R_WriteMultipleRegisters(ST25R_NB1_TX_BYTES_REG, lenArray, 2);
     if (status != ST25R_OK) {
         return status;
@@ -1129,7 +1209,7 @@ byte ST25R_ReceiveData(byte *pData, ushort *len) {
     }
 
     /* Case 2. Less than FIFO_SIZE bytes to read */
-    else if (CheckForSpecificIRQ(ST25R_RX_STOP_IRQ) == ST25R_OK) {
+    else if (WaitForSpecificIRQ(ST25R_RX_STOP_IRQ) == ST25R_OK) {
         status = ST25R_ReadFifo(pData, &nbOfReadBytes);
         if (status != ST25R_OK) {
             return status;
@@ -1166,6 +1246,12 @@ byte ST25R_TransmitREQA(void) {
     byte status = ST25R_OK;
     //byte regData = 0;
 
+    /* Set the number of valid bits to 0 */
+    status = ST25R_ModifyRegister(ST25R_NB2_TX_BYTES_REG, 0x00, 0x07);
+    if (status != ST25R_OK) {
+        return status;
+    }
+
     /* Set no_crc_rx bit in Auxiliary Definition register */
     status = ST25R_SetBitInRegister(ST25R_AUX_DEF_REG, 7);
     if (status != ST25R_OK) {
@@ -1195,6 +1281,12 @@ byte ST25R_TransmitWUPA(void) {
     /* Local variables */
     //byte regData = 0;
     byte status = 0;
+
+    /* Set the number of valid bits to 0 */
+    status = ST25R_ModifyRegister(ST25R_NB2_TX_BYTES_REG, 0x00, 0x07);
+    if (status != ST25R_OK) {
+        return status;
+    }
 
     /* Set no_crc_rx bit in Auxiliary Definition register */
     status = ST25R_SetBitInRegister(ST25R_AUX_DEF_REG, 7);
@@ -1230,27 +1322,23 @@ byte ST25R_TransmitWUPA(void) {
  * @return byte ST25R_UNKNOWN_ERROR if an unknown error occurs
  */
 byte ST25R_PerformAnticollA(void) {
-
+    
     /* Local variables */
     byte status = ST25R_OK;
     byte atqa[2] = {0};
     ushort len = 0;
+    byte uidSize = 0;
 
-    /* Check the PCD state 
-    if (ST25R_PCD_STATE != PCD_READY) {
-        return ST25R_UNKNOWN_ERROR;
-    }*/
-
-    /* Polling with REQA every 2 secs */
+    /* Polling with WUPA every 2 secs */
     do {
 
-        /* Send REQA command */
-        status = ST25R_TransmitREQA();
+        /* Send WUPA command */
+        status = ST25R_TransmitWUPA();
         if (status != ST25R_OK) {
             return status;
         }
-        if (CheckForSpecificIRQ(ST25R_NO_RESP_TIM_IRQ) == ST25R_OK) {
-            return ST25R_TIMEOUT_ERROR;
+        if (WaitForIRQ_T(10) == ST25R_NO_RESP_TIM_IRQ) {
+            return ST25R_NO_RESP_ERROR;
         }
 
         /* Receive ATQA, if there is any */
@@ -1261,12 +1349,32 @@ byte ST25R_PerformAnticollA(void) {
         if (CheckForSpecificIRQ(ST25R_NO_RESP_TIM_IRQ) == ST25R_OK) {
             return ST25R_TIMEOUT_ERROR;
         }
-
+        
+        /* Wait for 2 seconds */
         HAL_Delay(2000);
 
     } while ((status != ST25R_OK) && (len != 2));
 
-    /* TODO: Analyze the ATQA */
+    /* Analyze the ATQA */
+    if (atqa[0] != 0x00) {
+        return ST25R_UNKNOWN_ERROR;
+    }
+    byte uid = atqa[1] & UID_MASK;
+    switch (uid) {
+        case UID_SINGLE:
+            uidSize = UID_SINGLE_SIZE;
+            break;
+        case UID_DOUBLE:
+            uidSize = UID_DOUBLE_SIZE;
+            break;
+        case UID_TRIPLE:
+            uidSize = UID_TRIPLE_SIZE;
+            break;
+        default:
+            return ST25R_UNKNOWN_ERROR;
+    }
+
+
     /* TODO: Select and anticollision loop */
     /* TODO: Get UID and analyze it */
 

@@ -60,7 +60,9 @@ typedef uint32_t word;
 
 
 /* Type casting */
-#define MAKE_SHORT(hi, lo)      ((uint16_t)(((uint16_t)(hi) << 8) | (lo)))
+#define MAKE_SHORT(hi, lo)      ((ushort)(((ushort)(hi) << 8) | (lo)))
+#define MSB(x)                  ((byte)((x) >> 8))
+#define LSB(x)                  ((byte)(x))
 
 /* Debug */
 #if defined(DEBUG)
