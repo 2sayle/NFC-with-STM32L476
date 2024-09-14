@@ -850,8 +850,9 @@ byte ST25R_SelectTypeA(void) {
         return status;
     }
 
-    /* Set anticollision bit in proper register */
-    status = ST25R_SetBitInRegister(ST25R_ISO14443A_NFC_REG, 0);
+    /* Configure ISO14443A and NFC 106kbps register */
+    regData = 0x0B; // Anticollision bit + PWM setting (0x05 for 40/fc) (See Table 27 of DS11793)
+    status = ST25R_WriteRegister(ST25R_ISO14443A_NFC_REG, regData);
     if (status != ST25R_OK) {
         return status;
     }
@@ -911,8 +912,8 @@ byte ST25R_SelectTypeA(void) {
     }
 
     /* RFID protocols usually require that the reader field is turned on 
-    for a while before sending the first command (5 ms for ISO14443) */
-    HAL_Delay(5);
+    for a bit before sending the first command (5 ms for ISO14443) */
+    HAL_Delay(6);
 
     return ST25R_OK;
 
@@ -1186,8 +1187,10 @@ byte ST25R_ReceiveData(byte *pData, ushort *len) {
     byte status = ST25R_OK;
     byte nbOfReadBytes = 0;
 
+    irq_reason_t irqReason = WaitForIRQ_T(10);
+
     /* Case 1. More than FIFO_SIZE bytes to read */
-    if (CheckForSpecificIRQ(ST25R_FIFO_WATER_LVL_IRQ) == ST25R_OK) {
+    if (irqReason == ST25R_FIFO_WATER_LVL_IRQ) {
 
         /* Read bytes until End of Reception IRQ */
         do {
@@ -1209,7 +1212,7 @@ byte ST25R_ReceiveData(byte *pData, ushort *len) {
     }
 
     /* Case 2. Less than FIFO_SIZE bytes to read */
-    else if (WaitForSpecificIRQ(ST25R_RX_STOP_IRQ) == ST25R_OK) {
+    else if (irqReason == ST25R_RX_STOP_IRQ) {
         status = ST25R_ReadFifo(pData, &nbOfReadBytes);
         if (status != ST25R_OK) {
             return status;
@@ -1219,8 +1222,12 @@ byte ST25R_ReceiveData(byte *pData, ushort *len) {
         *len = nbOfReadBytes;
     }
 
+    /* Error cases */
     else if (nbOfReadBytes == 0) {
         return ST25R_FIFO_EMPTY_ERROR;
+    }
+    else {
+        return ST25R_UNKNOWN_ERROR;
     }
     
     return ST25R_OK;
@@ -1349,7 +1356,7 @@ byte ST25R_PerformAnticollA(void) {
         if (CheckForSpecificIRQ(ST25R_NO_RESP_TIM_IRQ) == ST25R_OK) {
             return ST25R_TIMEOUT_ERROR;
         }
-        
+
         /* Wait for 2 seconds */
         HAL_Delay(2000);
 
